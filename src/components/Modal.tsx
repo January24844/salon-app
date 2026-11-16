@@ -53,7 +53,7 @@ export function ErrorBox({ error }: { error: string | null }) {
 export function errText(e: unknown): string {
   if (!e) return "Nieznany błąd";
   const msg = typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : String(e);
-  if (msg.includes("no_staff_overlap") || msg.includes("exclusion")) return "W tym czasie ta pracownica ma już inną wizytę.";
+  if (msg.includes("no_room_overlap") || msg.includes("exclusion")) return "W tym czasie ten gabinet / urządzenie jest już zajęty.";
   if (msg.includes("row-level security")) return "Brak uprawnień do tej operacji.";
   return msg;
 }

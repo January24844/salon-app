@@ -17,15 +17,66 @@ import type {
   WorkingHours,
 } from "@/lib/types";
 import { clientName } from "@/lib/types";
-import { addDays, formatDayLong, isoWeek, minToTime, timeToMin, toZoned, todayStr, zonedToUtc } from "@/lib/time";
+import {
+  addDays,
+  formatDayLong,
+  isoWeek,
+  minToTime,
+  timeToMin,
+  toZoned,
+  todayStr,
+  zonedToUtc,
+} from "@/lib/time";
 import AppointmentForm, { type FormInit } from "./AppointmentForm";
-import { AppointmentDetails, DayNotesDialog, DayScheduleDialog, FinalizeDialog } from "./Dialogs";
+import {
+  AppointmentDetails,
+  DayNotesDialog,
+  DayScheduleDialog,
+  FinalizeDialog,
+} from "./Dialogs";
 import MiniMonth from "./MiniMonth";
 import { workIntervals, type Interval } from "./schedule";
 import { errText } from "@/components/Modal";
 
 const PX = 1.4; // pikseli na minutę → 84 px na godzinę
 const SNAP = 5; // minuty
+const GAP = 18; // pas z prawej strony kolumny – klik obok wizyty dodaje kolejną
+
+/**
+ * Wizyty nachodzące na siebie w jednej kolumnie układamy obok siebie (jak w Versum):
+ * każda dostaje "tor" (lane) i liczbę torów w swojej grupie.
+ */
+function layoutLanes(items: Appointment[]) {
+  const sorted = [...items].sort(
+    (a, b) =>
+      Date.parse(a.starts_at) - Date.parse(b.starts_at) ||
+      Date.parse(b.ends_at) - Date.parse(a.ends_at),
+  );
+  const out = new Map<string, { lane: number; lanes: number }>();
+  let group: { id: string; lane: number }[] = [];
+  let laneEnds: number[] = [];
+  let groupEnd = -Infinity;
+  const flush = () => {
+    for (const g of group)
+      out.set(g.id, { lane: g.lane, lanes: laneEnds.length });
+    group = [];
+    laneEnds = [];
+  };
+  for (const a of sorted) {
+    const st = Date.parse(a.starts_at);
+    const en = Date.parse(a.ends_at);
+    if (st >= groupEnd) flush();
+    let lane = laneEnds.findIndex((end) => end <= st);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(en);
+    } else laneEnds[lane] = en;
+    group.push({ id: a.id, lane });
+    groupEnd = Math.max(groupEnd === -Infinity ? en : groupEnd, en);
+  }
+  flush();
+  return out;
+}
 
 type Dialog =
   | { kind: "form"; init: FormInit }
@@ -54,18 +105,33 @@ export type CalendarData = {
 };
 
 export default function CalendarView(props: CalendarData) {
-  const { date, staff, rooms, hours, schedule, appointments, labels, methods, notes, isOwner } = props;
+  const {
+    date,
+    staff,
+    rooms,
+    hours,
+    schedule,
+    appointments,
+    labels,
+    methods,
+    notes,
+    isOwner,
+  } = props;
   const router = useRouter();
   const [dialog, setDialog] = useState<Dialog>(null);
   const [hidden, setHidden] = useState<string[]>([]);
-  const [now, setNow] = useState<{ date: string; minutes: number } | null>(null);
+  const [now, setNow] = useState<{ date: string; minutes: number } | null>(
+    null,
+  );
   const [toast, setToast] = useState<string | null>(null);
   const [showSide, setShowSide] = useState(false);
 
   // ukryte pracownice zapamiętane w przeglądarce
   useEffect(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem("cal-hidden-staff") ?? "[]");
+      const saved = JSON.parse(
+        localStorage.getItem("cal-hidden-staff") ?? "[]",
+      );
       // eslint-disable-next-line react-hooks/set-state-in-effect
       if (Array.isArray(saved)) setHidden(saved);
     } catch {}
@@ -97,18 +163,38 @@ export default function CalendarView(props: CalendarData) {
     for (const x of appointments) {
       a = Math.min(a, Math.floor(toZoned(x.starts_at).minutes / 60) * 60);
       const e = toZoned(x.ends_at);
-      b = Math.max(b, e.date !== date ? 24 * 60 : Math.ceil(e.minutes / 60) * 60);
+      b = Math.max(
+        b,
+        e.date !== date ? 24 * 60 : Math.ceil(e.minutes / 60) * 60,
+      );
     }
     return [a, b];
   }, [appointments, props.calendarStart, props.calendarEnd, date]);
-  const fallback: Interval = [timeToMin(props.calendarStart), timeToMin(props.calendarEnd)];
+  const fallback: Interval = [
+    timeToMin(props.calendarStart),
+    timeToMin(props.calendarEnd),
+  ];
   const height = (rangeEnd - rangeStart) * PX;
 
-  type Col = { kind: "staff" | "room"; id: string; name: string; color: string; label: string; intervals: Interval[] };
+  type Col = {
+    kind: "staff" | "room";
+    id: string;
+    name: string;
+    color: string;
+    label: string;
+    intervals: Interval[];
+  };
   const cols: Col[] = [
     ...visible.map((s) => {
       const w = workIntervals(s.id, date, hours, schedule, fallback);
-      return { kind: "staff" as const, id: s.id, name: s.full_name, color: s.color, label: w.label || "ustaw grafik", intervals: w.intervals };
+      return {
+        kind: "staff" as const,
+        id: s.id,
+        name: s.full_name,
+        color: s.color,
+        label: w.label || "ustaw grafik",
+        intervals: w.intervals,
+      };
     }),
     ...visibleRooms.map((r) => ({
       kind: "room" as const,
@@ -116,11 +202,23 @@ export default function CalendarView(props: CalendarData) {
       name: r.name,
       color: r.color,
       label: `${r.open_time.slice(0, 5)} - ${r.close_time.slice(0, 5)}`,
-      intervals: [[timeToMin(r.open_time), timeToMin(r.close_time)] as Interval],
+      intervals: [
+        [timeToMin(r.open_time), timeToMin(r.close_time)] as Interval,
+      ],
     })),
   ];
-  const inCol = (a: Appointment, c: Col) => (c.kind === "staff" ? a.staff_id === c.id : a.room_id === c.id);
-  const hoursList = Array.from({ length: (rangeEnd - rangeStart) / 60 }, (_, i) => rangeStart + i * 60);
+  const inCol = (a: Appointment, c: Col) =>
+    c.kind === "staff" ? a.staff_id === c.id : a.room_id === c.id;
+  // kolumna z kilkoma wizytami obok siebie robi się szersza (ok. 70 px na wizytę)
+  const colMinWidth = (c: Col) => {
+    let max = 1;
+    for (const v of layoutLanes(appointments.filter((a) => inCol(a, c))).values()) max = Math.max(max, v.lanes);
+    return max > 1 ? max * 70 + GAP : undefined;
+  };
+  const hoursList = Array.from(
+    { length: (rangeEnd - rangeStart) / 60 },
+    (_, i) => rangeStart + i * 60,
+  );
 
   const refresh = () => {
     setDialog(null);
@@ -136,28 +234,55 @@ export default function CalendarView(props: CalendarData) {
     moved: boolean;
     el: HTMLElement;
   } | null>(null);
-  const [ghost, setGhost] = useState<{ id: string; kind: "staff" | "room"; colId: string; minutes: number } | null>(null);
-  const [hover, setHover] = useState<{ key: string; minutes: number } | null>(null);
+  const [ghost, setGhost] = useState<{
+    id: string;
+    kind: "staff" | "room";
+    colId: string;
+    minutes: number;
+  } | null>(null);
+  const [hover, setHover] = useState<{ key: string; minutes: number } | null>(
+    null,
+  );
 
-  function onBlockPointerDown(e: React.PointerEvent<HTMLElement>, appt: Appointment) {
+  function onBlockPointerDown(
+    e: React.PointerEvent<HTMLElement>,
+    appt: Appointment,
+  ) {
     if (e.button !== 0) return;
     e.stopPropagation();
     const open = appt.status === "booked" || appt.status === "confirmed";
-    drag.current = { appt, startY: e.clientY, startMin: toZoned(appt.starts_at).minutes, moved: false, el: e.currentTarget };
+    drag.current = {
+      appt,
+      startY: e.clientY,
+      startMin: toZoned(appt.starts_at).minutes,
+      moved: false,
+      el: e.currentTarget,
+    };
     if (open) e.currentTarget.setPointerCapture(e.pointerId);
   }
   function onBlockPointerMove(e: React.PointerEvent<HTMLElement>) {
     const d = drag.current;
-    if (!d || !(d.appt.status === "booked" || d.appt.status === "confirmed")) return;
+    if (!d || !(d.appt.status === "booked" || d.appt.status === "confirmed"))
+      return;
     const dy = e.clientY - d.startY;
     if (!d.moved && Math.abs(dy) < 6) return;
     d.moved = true;
-    const minutes = Math.max(rangeStart, Math.round((d.startMin + dy / PX) / SNAP) * SNAP);
+    const minutes = Math.max(
+      rangeStart,
+      Math.round((d.startMin + dy / PX) / SNAP) * SNAP,
+    );
     const col = document
       .elementsFromPoint(e.clientX, e.clientY)
-      .find((el) => (el as HTMLElement).dataset?.colId) as HTMLElement | undefined;
-    const kind = (col?.dataset.colKind as "staff" | "room" | undefined) ?? "staff";
-    setGhost({ id: d.appt.id, kind, colId: col?.dataset.colId ?? d.appt.staff_id, minutes });
+      .find((el) => (el as HTMLElement).dataset?.colId) as
+      HTMLElement | undefined;
+    const kind =
+      (col?.dataset.colKind as "staff" | "room" | undefined) ?? "staff";
+    setGhost({
+      id: d.appt.id,
+      kind,
+      colId: col?.dataset.colId ?? d.appt.staff_id,
+      minutes,
+    });
   }
   async function onBlockPointerUp(appt: Appointment) {
     const d = drag.current;
@@ -173,7 +298,12 @@ export default function CalendarView(props: CalendarData) {
     const oldStart = toZoned(appt.starts_at).minutes;
     const newStaff = g.kind === "staff" ? g.colId : appt.staff_id;
     const newRoom = g.kind === "room" ? g.colId : appt.room_id;
-    if (g.minutes === oldStart && newStaff === appt.staff_id && newRoom === appt.room_id) return;
+    if (
+      g.minutes === oldStart &&
+      newStaff === appt.staff_id &&
+      newRoom === appt.room_id
+    )
+      return;
     const dur = (Date.parse(appt.ends_at) - Date.parse(appt.starts_at)) / 60000;
     const start = zonedToUtc(date, minToTime(g.minutes));
     const { error } = await createClient().rpc("save_appointment", {
@@ -186,10 +316,17 @@ export default function CalendarView(props: CalendarData) {
         ends_at: new Date(start.getTime() + dur * 60000).toISOString(),
         services: [...appt.appointment_services]
           .sort((a, b) => a.position - b.position)
-          .map((s) => ({ service_id: s.service_id, duration_minutes: s.duration_minutes, price: s.price, client_package_id: s.client_package_id })),
+          .map((s) => ({
+            service_id: s.service_id,
+            duration_minutes: s.duration_minutes,
+            price: s.price,
+            client_package_id: s.client_package_id,
+          })),
         labels: appt.appointment_labels.map((l) => l.label_id),
         note: appt.staff_note,
-        deposit: appt.deposit_amount ? { amount: appt.deposit_amount, method: appt.deposit_method } : null,
+        deposit: appt.deposit_amount
+          ? { amount: appt.deposit_amount, method: appt.deposit_method }
+          : null,
       },
     });
     if (error) {
@@ -201,11 +338,25 @@ export default function CalendarView(props: CalendarData) {
 
   /* ----- kliknięcie w pusty pasek ----- */
   const minutesAt = (e: React.MouseEvent<HTMLDivElement>) =>
-    rangeStart + Math.floor((e.clientY - e.currentTarget.getBoundingClientRect().top) / PX / SNAP) * SNAP;
+    rangeStart +
+    Math.floor(
+      (e.clientY - e.currentTarget.getBoundingClientRect().top) / PX / SNAP,
+    ) *
+      SNAP;
   function onColumnClick(e: React.MouseEvent<HTMLDivElement>, c: Col) {
     const time = minToTime(minutesAt(e));
-    if (c.kind === "staff") setDialog({ kind: "form", init: { staffId: c.id, date, time } });
-    else setDialog({ kind: "form", init: { staffId: visible[0]?.id ?? staff[0]?.id, roomId: c.id, date, time } });
+    if (c.kind === "staff")
+      setDialog({ kind: "form", init: { staffId: c.id, date, time } });
+    else
+      setDialog({
+        kind: "form",
+        init: {
+          staffId: visible[0]?.id ?? staff[0]?.id,
+          roomId: c.id,
+          date,
+          time,
+        },
+      });
   }
 
   const isToday = now?.date === date;
@@ -218,36 +369,59 @@ export default function CalendarView(props: CalendarData) {
         className={`${showSide ? "fixed inset-y-0 left-0 z-40 block w-72 shadow-xl" : "hidden"} shrink-0 border-r border-border bg-card p-4 lg:static lg:block lg:w-64 lg:shadow-none print:hidden`}
       >
         <div className="mb-3 flex justify-end lg:hidden">
-          <button className="btn-ghost" onClick={() => setShowSide(false)}>Zamknij ×</button>
+          <button className="btn-ghost" onClick={() => setShowSide(false)}>
+            Zamknij ×
+          </button>
         </div>
         <MiniMonth key={date.slice(0, 7)} selected={date} />
-        <h2 className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Pracownicy</h2>
+        <h2 className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+          Pracownicy
+        </h2>
         <ul className="space-y-1">
           {staff.map((s) => (
             <li key={s.id}>
               <label className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-sm hover:bg-accent-soft">
-                <input type="checkbox" checked={!hidden.includes(s.id)} onChange={() => toggleStaff(s.id)} />
+                <input
+                  type="checkbox"
+                  checked={!hidden.includes(s.id)}
+                  onChange={() => toggleStaff(s.id)}
+                />
                 <span className="flex-1">{s.full_name}</span>
-                <span className="size-3.5 rounded-sm" style={{ background: s.color }} />
+                <span
+                  className="size-3.5 rounded-sm"
+                  style={{ background: s.color }}
+                />
               </label>
             </li>
           ))}
         </ul>
         {staff.length === 0 && (
           <p className="text-sm text-muted">
-            Brak pracownic. <Link className="text-accent underline" href="/panel/pracownice">Dodaj</Link>
+            Brak pracownic.{" "}
+            <Link className="text-accent underline" href="/panel/pracownice">
+              Dodaj
+            </Link>
           </p>
         )}
         {rooms.length > 0 && (
           <>
-            <h2 className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Gabinety i urządzenia</h2>
+            <h2 className="mt-6 mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+              Gabinety i urządzenia
+            </h2>
             <ul className="space-y-1">
               {rooms.map((r) => (
                 <li key={r.id}>
                   <label className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-sm hover:bg-accent-soft">
-                    <input type="checkbox" checked={!hidden.includes(r.id)} onChange={() => toggleStaff(r.id)} />
+                    <input
+                      type="checkbox"
+                      checked={!hidden.includes(r.id)}
+                      onChange={() => toggleStaff(r.id)}
+                    />
                     <span className="flex-1">{r.name}</span>
-                    <span className="size-3.5 rounded-sm" style={{ background: r.color }} />
+                    <span
+                      className="size-3.5 rounded-sm"
+                      style={{ background: r.color }}
+                    />
                   </label>
                 </li>
               ))}
@@ -259,19 +433,58 @@ export default function CalendarView(props: CalendarData) {
       {/* ---------- kalendarz ---------- */}
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 print:hidden">
-          <button className="btn-secondary px-3 lg:hidden" onClick={() => setShowSide(true)} aria-label="Kalendarz i pracownice">☰</button>
+          <button
+            className="btn-secondary px-3 lg:hidden"
+            onClick={() => setShowSide(true)}
+            aria-label="Kalendarz i pracownice"
+          >
+            ☰
+          </button>
           <div className="flex">
-            <Link href={`/panel?d=${addDays(date, -1)}`} className="btn-secondary rounded-r-none px-3" aria-label="Poprzedni dzień">‹</Link>
-            <Link href={`/panel?d=${addDays(date, 1)}`} className="btn-secondary -ml-px rounded-l-none px-3" aria-label="Następny dzień">›</Link>
+            <Link
+              href={`/panel?d=${addDays(date, -1)}`}
+              className="btn-secondary rounded-r-none px-3"
+              aria-label="Poprzedni dzień"
+            >
+              ‹
+            </Link>
+            <Link
+              href={`/panel?d=${addDays(date, 1)}`}
+              className="btn-secondary -ml-px rounded-l-none px-3"
+              aria-label="Następny dzień"
+            >
+              ›
+            </Link>
           </div>
-          <Link href={`/panel?d=${todayStr()}`} className="btn-secondary">dzisiaj</Link>
-          <h1 className="ml-1 text-lg font-medium first-letter:uppercase">{formatDayLong(date)}</h1>
+          <Link href={`/panel?d=${todayStr()}`} className="btn-secondary">
+            dzisiaj
+          </Link>
+          <h1 className="ml-1 text-lg font-medium first-letter:uppercase">
+            {formatDayLong(date)}
+          </h1>
           <span className="text-sm text-muted">tydz. {isoWeek(date)}</span>
           <div className="ml-auto flex gap-2">
-            <button className="btn-ghost text-sm" onClick={() => window.print()}>Drukuj</button>
+            <button
+              className="btn-ghost text-sm"
+              onClick={() => window.print()}
+            >
+              Drukuj
+            </button>
             <button
               className="btn-primary"
-              onClick={() => setDialog({ kind: "form", init: { staffId: visible[0]?.id ?? staff[0]?.id, date, time: isToday && now ? minToTime(Math.ceil(now.minutes / 15) * 15) : minToTime(fallback[0]) } })}
+              onClick={() =>
+                setDialog({
+                  kind: "form",
+                  init: {
+                    staffId: visible[0]?.id ?? staff[0]?.id,
+                    date,
+                    time:
+                      isToday && now
+                        ? minToTime(Math.ceil(now.minutes / 15) * 15)
+                        : minToTime(fallback[0]),
+                  },
+                })
+              }
               disabled={!staff.length}
             >
               + Nowa wizyta
@@ -289,42 +502,70 @@ export default function CalendarView(props: CalendarData) {
         )}
 
         <div className="flex-1 overflow-auto">
-          <div className="min-w-max" style={{ ["--cols" as string]: visible.length }}>
+          <div
+            className="min-w-max"
+            style={{ ["--cols" as string]: visible.length }}
+          >
             {/* nagłówki */}
             <div className="sticky top-0 z-20 flex border-b border-border bg-card">
               <div className="w-14 shrink-0 border-r border-border px-1 py-2 text-center text-xs text-muted">
-                <button className="hover:text-foreground" onClick={() => setDialog({ kind: "notes", staffId: null })} title="Notatka dla całego salonu">
+                <button
+                  className="hover:text-foreground"
+                  onClick={() => setDialog({ kind: "notes", staffId: null })}
+                  title="Notatka dla całego salonu"
+                >
                   dzień
                 </button>
               </div>
               {cols.map((c) => {
-                const dayNotes = c.kind === "staff" ? notes.filter((n) => n.staff_id === c.id) : [];
+                const dayNotes =
+                  c.kind === "staff"
+                    ? notes.filter((n) => n.staff_id === c.id)
+                    : [];
                 return (
-                  <div key={c.kind + c.id} className={`w-40 shrink-0 border-r border-border sm:w-auto sm:min-w-32 sm:flex-1 ${c.kind === "room" ? "bg-accent-soft/40" : ""}`}>
+                  <div
+                    key={c.kind + c.id}
+                    className={`w-40 shrink-0 border-r border-border sm:w-auto sm:min-w-32 sm:flex-1 ${c.kind === "room" ? "bg-accent-soft/40" : ""}`}
+                    style={{ minWidth: colMinWidth(c) }}
+                  >
                     {c.kind === "staff" ? (
                       <button
                         className="w-full px-2 pt-2 text-center hover:bg-accent-soft"
-                        onClick={() => setDialog({ kind: "schedule", staffId: c.id })}
+                        onClick={() =>
+                          setDialog({ kind: "schedule", staffId: c.id })
+                        }
                         title="Zmień grafik na ten dzień"
                       >
                         <span className="flex items-center justify-center gap-1.5 text-sm font-semibold">
-                          <span className="size-2.5 rounded-full" style={{ background: c.color }} />
+                          <span
+                            className="size-2.5 rounded-full"
+                            style={{ background: c.color }}
+                          />
                           {c.name}
                         </span>
-                        <span className="block pb-1 text-xs text-muted">{c.label}</span>
+                        <span className="block pb-1 text-xs text-muted">
+                          {c.label}
+                        </span>
                       </button>
                     ) : (
                       <div className="px-2 pt-2 text-center">
                         <span className="flex items-center justify-center gap-1.5 text-sm font-semibold">
-                          <span className="size-2.5 rounded-sm" style={{ background: c.color }} />
+                          <span
+                            className="size-2.5 rounded-sm"
+                            style={{ background: c.color }}
+                          />
                           {c.name}
                         </span>
-                        <span className="block pb-1 text-xs text-muted">{c.label}</span>
+                        <span className="block pb-1 text-xs text-muted">
+                          {c.label}
+                        </span>
                       </div>
                     )}
                     {c.kind === "staff" ? (
                       <button
-                        onClick={() => setDialog({ kind: "notes", staffId: c.id })}
+                        onClick={() =>
+                          setDialog({ kind: "notes", staffId: c.id })
+                        }
                         className="block min-h-6 w-full border-t border-border px-2 py-1 text-left text-xs text-muted hover:bg-accent-soft"
                         title="Notatka na cały dzień"
                       >
@@ -340,9 +581,16 @@ export default function CalendarView(props: CalendarData) {
 
             {/* siatka */}
             <div className="flex">
-              <div className="relative w-14 shrink-0 border-r border-border" style={{ height }}>
+              <div
+                className="relative w-14 shrink-0 border-r border-border"
+                style={{ height }}
+              >
                 {hoursList.map((m) => (
-                  <span key={m} className="absolute right-1.5 -translate-y-0.5 text-xs text-muted" style={{ top: (m - rangeStart) * PX + 2 }}>
+                  <span
+                    key={m}
+                    className="absolute right-1.5 -translate-y-0.5 text-xs text-muted"
+                    style={{ top: (m - rangeStart) * PX + 2 }}
+                  >
                     {minToTime(m)}
                   </span>
                 ))}
@@ -350,19 +598,25 @@ export default function CalendarView(props: CalendarData) {
               {cols.map((c) => {
                 const key = c.kind + c.id;
                 const mine = appointments.filter((a) => inCol(a, c));
-                const ghostAppt = ghost && ghost.kind === c.kind && ghost.colId === c.id ? byId(ghost.id) : null;
-                const staffOf = (a: Appointment) => staff.find((x) => x.id === a.staff_id);
+                const lanes = layoutLanes(mine);
+                const ghostAppt =
+                  ghost && ghost.kind === c.kind && ghost.colId === c.id
+                    ? byId(ghost.id)
+                    : null;
+                const staffOf = (a: Appointment) =>
+                  staff.find((x) => x.id === a.staff_id);
                 return (
                   <div
                     key={key}
                     data-col-id={c.id}
                     data-col-kind={c.kind}
                     className="relative w-40 shrink-0 cursor-cell border-r border-border bg-foreground/[0.06] sm:w-auto sm:min-w-32 sm:flex-1"
-                    style={{ height }}
+                    style={{ height, minWidth: colMinWidth(c) }}
                     onClick={(e) => onColumnClick(e, c)}
                     onMouseMove={(e) => {
                       const m = minutesAt(e);
-                      if (hover?.key !== key || hover.minutes !== m) setHover({ key, minutes: m });
+                      if (hover?.key !== key || hover.minutes !== m)
+                        setHover({ key, minutes: m });
                     }}
                     onMouseLeave={() => setHover(null)}
                   >
@@ -371,7 +625,14 @@ export default function CalendarView(props: CalendarData) {
                       <div
                         key={i}
                         className="pointer-events-none absolute inset-x-0 bg-card"
-                        style={{ top: (Math.max(a, rangeStart) - rangeStart) * PX, height: Math.max(0, Math.min(b, rangeEnd) - Math.max(a, rangeStart)) * PX }}
+                        style={{
+                          top: (Math.max(a, rangeStart) - rangeStart) * PX,
+                          height:
+                            Math.max(
+                              0,
+                              Math.min(b, rangeEnd) - Math.max(a, rangeStart),
+                            ) * PX,
+                        }}
                       />
                     ))}
                     {/* linie co 15 min i co godzinę */}
@@ -383,7 +644,7 @@ export default function CalendarView(props: CalendarData) {
                     />
                     {hover?.key === key && !ghost && (
                       <span
-                        className="pointer-events-none absolute left-1 z-[1] text-[11px] text-muted tabular-nums"
+                        className="pointer-events-none absolute right-0.5 z-[6] -translate-y-1/2 rounded bg-card/90 px-0.5 text-[10px] text-muted tabular-nums"
                         style={{ top: (hover.minutes - rangeStart) * PX }}
                       >
                         {minToTime(hover.minutes)}
@@ -394,10 +655,14 @@ export default function CalendarView(props: CalendarData) {
                         key={a.id}
                         appt={a}
                         color={c.color}
-                        subtitle={c.kind === "room" ? staffOf(a)?.full_name : undefined}
+                        subtitle={
+                          c.kind === "room" ? staffOf(a)?.full_name : undefined
+                        }
                         rangeStart={rangeStart}
                         labels={labels}
                         dimmed={ghost?.id === a.id}
+                        lane={lanes.get(a.id)?.lane ?? 0}
+                        lanes={lanes.get(a.id)?.lanes ?? 1}
                         onPointerDown={(e) => onBlockPointerDown(e, a)}
                         onPointerMove={onBlockPointerMove}
                         onPointerUp={() => onBlockPointerUp(a)}
@@ -416,14 +681,22 @@ export default function CalendarView(props: CalendarData) {
                         onPointerUp={() => onBlockPointerUp(ghostAppt)}
                       />
                     )}
-                    {isToday && now && now.minutes >= rangeStart && now.minutes <= rangeEnd && (
-                      <div className="pointer-events-none absolute inset-x-0 z-10 h-0.5 bg-red-500" style={{ top: (now.minutes - rangeStart) * PX }} />
-                    )}
+                    {isToday &&
+                      now &&
+                      now.minutes >= rangeStart &&
+                      now.minutes <= rangeEnd && (
+                        <div
+                          className="pointer-events-none absolute inset-x-0 z-10 h-0.5 bg-red-500"
+                          style={{ top: (now.minutes - rangeStart) * PX }}
+                        />
+                      )}
                   </div>
                 );
               })}
               {cols.length === 0 && (
-                <div className="flex-1 p-8 text-center text-muted">Zaznacz pracownice w panelu po lewej.</div>
+                <div className="flex-1 p-8 text-center text-muted">
+                  Zaznacz pracownice w panelu po lewej.
+                </div>
               )}
             </div>
           </div>
@@ -431,7 +704,9 @@ export default function CalendarView(props: CalendarData) {
       </section>
 
       {toast && (
-        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-foreground px-4 py-2 text-sm text-background shadow-lg">{toast}</div>
+        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-foreground px-4 py-2 text-sm text-background shadow-lg">
+          {toast}
+        </div>
       )}
 
       {/* ---------- okna ---------- */}
@@ -465,28 +740,45 @@ export default function CalendarView(props: CalendarData) {
           onEdit={() => {
             const a = byId(dialog.id)!;
             const z = toZoned(a.starts_at);
-            setDialog({ kind: "form", init: { staffId: a.staff_id, roomId: a.room_id, date: z.date, time: z.time, appointment: a } });
+            setDialog({
+              kind: "form",
+              init: {
+                staffId: a.staff_id,
+                roomId: a.room_id,
+                date: z.date,
+                time: z.time,
+                appointment: a,
+              },
+            });
           }}
         />
       )}
       {dialog?.kind === "finalize" && byId(dialog.id) && (
-        <FinalizeDialog appt={byId(dialog.id)!} methods={methods} onClose={() => setDialog(null)} onDone={refresh} />
+        <FinalizeDialog
+          appt={byId(dialog.id)!}
+          methods={methods}
+          onClose={() => setDialog(null)}
+          onDone={refresh}
+        />
       )}
-      {dialog?.kind === "schedule" && (() => {
-        const s = staff.find((x) => x.id === dialog.staffId)!;
-        const w = workIntervals(s.id, date, hours, schedule, fallback);
-        const weekly = workIntervals(s.id, date, hours, [], fallback);
-        return (
-          <DayScheduleDialog
-            staff={s}
-            date={date}
-            current={w.override}
-            weeklyLabel={hours.some((h) => h.staff_id === s.id) ? weekly.label : ""}
-            onClose={() => setDialog(null)}
-            onSaved={refresh}
-          />
-        );
-      })()}
+      {dialog?.kind === "schedule" &&
+        (() => {
+          const s = staff.find((x) => x.id === dialog.staffId)!;
+          const w = workIntervals(s.id, date, hours, schedule, fallback);
+          const weekly = workIntervals(s.id, date, hours, [], fallback);
+          return (
+            <DayScheduleDialog
+              staff={s}
+              date={date}
+              current={w.override}
+              weeklyLabel={
+                hours.some((h) => h.staff_id === s.id) ? weekly.label : ""
+              }
+              onClose={() => setDialog(null)}
+              onSaved={refresh}
+            />
+          );
+        })()}
       {dialog?.kind === "notes" && (
         <DayNotesDialog
           date={date}
@@ -511,6 +803,8 @@ function Block({
   ghost,
   dimmed,
   subtitle,
+  lane = 0,
+  lanes = 1,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -523,20 +817,29 @@ function Block({
   ghost?: boolean;
   dimmed?: boolean;
   subtitle?: string;
+  lane?: number;
+  lanes?: number;
   onPointerDown: (e: React.PointerEvent<HTMLElement>) => void;
   onPointerMove: (e: React.PointerEvent<HTMLElement>) => void;
   onPointerUp: () => void;
 }) {
   const s = toZoned(appt.starts_at);
   const e = toZoned(appt.ends_at);
-  const dur = Math.round((Date.parse(appt.ends_at) - Date.parse(appt.starts_at)) / 60000);
+  const dur = Math.round(
+    (Date.parse(appt.ends_at) - Date.parse(appt.starts_at)) / 60000,
+  );
   const start = overrideStart ?? s.minutes;
   const top = (start - rangeStart) * PX;
   const h = Math.max(dur * PX, 18);
   const done = appt.status === "completed";
   const noShow = appt.status === "no_show";
-  const names = [...appt.appointment_services].sort((a, b) => a.position - b.position).map((x) => x.service?.name).join(", ");
-  const tags = appt.appointment_labels.map((l) => labels.find((x) => x.id === l.label_id)).filter(Boolean);
+  const names = [...appt.appointment_services]
+    .sort((a, b) => a.position - b.position)
+    .map((x) => x.service?.name)
+    .join(", ");
+  const tags = appt.appointment_labels
+    .map((l) => labels.find((x) => x.id === l.label_id))
+    .filter(Boolean);
 
   return (
     <button
@@ -545,37 +848,78 @@ function Block({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onClick={(ev) => ev.stopPropagation()}
-      className={`absolute inset-x-1 z-[5] touch-none overflow-hidden rounded-md border-l-4 px-1.5 py-0.5 text-left text-xs leading-tight shadow-sm transition ${
-        ghost ? "z-20 opacity-80 ring-2 ring-accent" : "hover:z-20 hover:shadow-md"
+      className={`absolute z-[5] touch-none overflow-hidden rounded-md border-l-4 px-1.5 py-0.5 text-left text-xs leading-tight shadow-sm transition ${
+        ghost
+          ? "z-20 opacity-80 ring-2 ring-accent"
+          : "hover:z-20 hover:shadow-md"
       } ${noShow || dimmed ? "opacity-40" : ""} ${ghost ? "pointer-events-none" : ""}`}
       style={{
         top,
         height: h,
+        left: `calc(${lane} * (100% - ${GAP}px) / ${lanes} + 2px)`,
+        width: `calc((100% - ${GAP}px) / ${lanes} - 3px)`,
         borderLeftColor: color,
         background: `color-mix(in srgb, ${color} ${done ? 22 : 45}%, var(--card))`,
         color: "var(--foreground)",
       }}
       title={`${s.time}–${e.time} ${clientName(appt.client)}\n${names}`}
     >
-      <span className="absolute inset-x-1.5 top-0.5 block">
-      <span className="font-semibold tabular-nums">
-        {overrideStart !== undefined ? `${minToTime(start)}–${minToTime(start + dur)}` : `${s.time}–${e.time}`}
-      </span>{" "}
-      {done && <span title="sfinalizowana">✓</span>}
-      {noShow && <span title="nie przyszła">✗</span>}
-      {appt.status === "confirmed" && <span title="potwierdzona">☑</span>}
-      {appt.source === "online" && <span title="rezerwacja online">🌐</span>}{" "}
-      <span className={`font-medium ${noShow ? "line-through" : ""}`}>{clientName(appt.client)}</span>
-      {dur >= 30 && <span className="block truncate text-[11px] opacity-80">{names}</span>}
-      {subtitle && dur >= 45 && <span className="block truncate text-[11px] opacity-80">👤 {subtitle}</span>}
-      {dur >= 45 && tags.length > 0 && (
-        <span className="mt-0.5 flex gap-1">
-          {tags.map((t) => (
-            <span key={t!.id} className="rounded px-1 text-[10px] text-white" style={{ background: t!.color }}>{t!.name}</span>
-          ))}
+      {lanes > 1 ? (
+        // wąski blok (kilka wizyt obok siebie): godzina i klientka w osobnych, skróconych linijkach
+        <span className="absolute inset-x-1 top-0.5 block overflow-hidden text-[11px] leading-tight">
+          <span className="block truncate font-semibold tabular-nums">
+            {overrideStart !== undefined ? minToTime(start) : s.time}
+            {done && " ✓"}
+            {noShow && " ✗"}
+          </span>
+          <span className={`block truncate ${noShow ? "line-through" : ""}`}>
+            {clientName(appt.client)}
+          </span>
+          {dur >= 45 && (
+            <span className="block truncate opacity-80">{names}</span>
+          )}
+        </span>
+      ) : (
+        <span className="absolute inset-x-1.5 top-0.5 block">
+          <span className="font-semibold tabular-nums">
+            {overrideStart !== undefined
+              ? `${minToTime(start)}–${minToTime(start + dur)}`
+              : `${s.time}–${e.time}`}
+          </span>{" "}
+          {done && <span title="sfinalizowana">✓</span>}
+          {noShow && <span title="nie przyszła">✗</span>}
+          {appt.status === "confirmed" && <span title="potwierdzona">☑</span>}
+          {appt.source === "online" && (
+            <span title="rezerwacja online">🌐</span>
+          )}{" "}
+          <span className={`font-medium ${noShow ? "line-through" : ""}`}>
+            {clientName(appt.client)}
+          </span>
+          {dur >= 30 && (
+            <span className="block truncate text-[11px] opacity-80">
+              {names}
+            </span>
+          )}
+          {subtitle && dur >= 45 && (
+            <span className="block truncate text-[11px] opacity-80">
+              👤 {subtitle}
+            </span>
+          )}
+          {dur >= 45 && tags.length > 0 && (
+            <span className="mt-0.5 flex gap-1">
+              {tags.map((t) => (
+                <span
+                  key={t!.id}
+                  className="rounded px-1 text-[10px] text-white"
+                  style={{ background: t!.color }}
+                >
+                  {t!.name}
+                </span>
+              ))}
+            </span>
+          )}
         </span>
       )}
-      </span>
     </button>
   );
 }
