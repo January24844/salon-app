@@ -109,3 +109,54 @@ export const clientName = (c: { first_name: string; last_name: string | null } |
 /** wyszukiwanie bez polskich znaków i wielkości liter */
 export const norm = (s: string) =>
   s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ł/g, "l");
+
+export type ProductCategory = { id: string; name: string; sort_order: number };
+
+export type ProductKind = "towar" | "material" | "towar_material";
+export const KIND_LABEL: Record<ProductKind, string> = {
+  towar: "towar",
+  material: "materiał",
+  towar_material: "towar i materiał",
+};
+
+export type Product = {
+  id: string;
+  name: string;
+  category_id: string | null;
+  kind: ProductKind;
+  sku: string | null;
+  capacity_ml: number | null;
+  stock: number;
+  min_stock: number | null;
+  price: number;
+  active: boolean;
+};
+
+export type StockReason = "dostawa" | "sprzedaz" | "zuzycie" | "korekta";
+export const REASON_LABEL: Record<StockReason, string> = {
+  dostawa: "dostawa",
+  sprzedaz: "sprzedaż",
+  zuzycie: "zużycie",
+  korekta: "korekta",
+};
+
+export type StockMovement = {
+  id: string;
+  product_id: string;
+  change: number;
+  reason: StockReason;
+  unit_price: number | null;
+  note: string | null;
+  created_at: string;
+  appointment_id: string | null;
+  product: { name: string } | null;
+  client: { first_name: string; last_name: string | null } | null;
+  staff: { full_name: string } | null;
+};
+
+/** Pozycja sprzedaży produktu (w sprzedaży i przy finalizacji wizyty). */
+export type SaleLine = { product_id: string; name: string; qty: number; price: number; stock: number };
+
+/** Ilość bez zbędnych zer: 1, 2,5 */
+export const qtyFmt = (n: number | string) =>
+  new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 2 }).format(Number(n));

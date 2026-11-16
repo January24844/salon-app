@@ -10,6 +10,7 @@ import type {
   DayNote,
   Label,
   PaymentMethod,
+  Product,
   Room,
   ScheduleDay,
   Service,
@@ -98,6 +99,7 @@ export type CalendarData = {
   methods: PaymentMethod[];
   notes: DayNote[];
   rooms: Room[];
+  products: Product[];
   serviceRooms: { service_id: string; room_id: string }[];
   calendarStart: string;
   calendarEnd: string;
@@ -757,6 +759,7 @@ export default function CalendarView(props: CalendarData) {
         <FinalizeDialog
           appt={byId(dialog.id)!}
           methods={methods}
+          products={props.products}
           onClose={() => setDialog(null)}
           onDone={refresh}
         />

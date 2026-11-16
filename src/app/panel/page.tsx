@@ -8,6 +8,7 @@ import {
   type DayNote,
   type Label,
   type PaymentMethod,
+  type Product,
   type Room,
   type ScheduleDay,
   type Service,
@@ -23,7 +24,7 @@ export default async function CalendarPage({ searchParams }: PageProps<"/panel">
   const from = zonedToUtc(date).toISOString();
   const to = zonedToUtc(addDays(date, 1)).toISOString();
 
-  const [staff, hours, schedule, appts, services, cats, labels, methods, notes, settings, rooms, serviceRooms] = await Promise.all([
+  const [staff, hours, schedule, appts, services, cats, labels, methods, notes, settings, rooms, serviceRooms, products] = await Promise.all([
     supabase.from("staff").select("*").eq("active", true).order("sort_order").order("full_name"),
     supabase.from("staff_working_hours").select("staff_id, weekday, start_time, end_time"),
     supabase.from("staff_schedule_days").select("*").eq("day", date),
@@ -46,6 +47,7 @@ export default async function CalendarPage({ searchParams }: PageProps<"/panel">
     supabase.from("salon_settings").select("calendar_start, calendar_end").maybeSingle(),
     supabase.from("rooms").select("*").eq("active", true).order("sort_order").order("name"),
     supabase.from("service_rooms").select("service_id, room_id"),
+    supabase.from("products").select("*").eq("active", true).neq("kind", "material").order("name"),
   ]);
 
   const firstError = [staff, hours, schedule, appts, services, cats, labels, methods, notes, rooms].find((r) => r.error)?.error;
@@ -72,6 +74,7 @@ export default async function CalendarPage({ searchParams }: PageProps<"/panel">
       methods={(methods.data ?? []) as PaymentMethod[]}
       notes={(notes.data ?? []) as DayNote[]}
       rooms={(rooms.data ?? []) as Room[]}
+      products={(products.data ?? []) as Product[]}
       serviceRooms={serviceRooms.data ?? []}
       calendarStart={settings.data?.calendar_start ?? "08:00"}
       calendarEnd={settings.data?.calendar_end ?? "21:00"}

@@ -4,7 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import Modal, { ErrorBox, errText } from "@/components/Modal";
-import type { Appointment, AppointmentStatus, DayNote, Label, PaymentMethod, Room, ScheduleDay, Staff } from "@/lib/types";
+import type { Appointment, AppointmentStatus, DayNote, Label, PaymentMethod, Product, Room, SaleLine, ScheduleDay, Staff } from "@/lib/types";
+import ProductLines, { linesTotal } from "@/components/warehouse/ProductLines";
+import PaymentLines, { rebalance, type PayLine } from "@/components/warehouse/PaymentLines";
 import { STATUS_LABEL, clientName } from "@/lib/types";
 import { formatDayLong, money, toZoned } from "@/lib/time";
 
@@ -177,27 +179,40 @@ export function AppointmentDetails({
 export function FinalizeDialog({
   appt,
   methods,
+  products,
   onClose,
   onDone,
 }: {
   appt: Appointment;
   methods: PaymentMethod[];
+  products: Product[];
   onClose: () => void;
   onDone: () => void;
 }) {
-  const total = appt.appointment_services.reduce((n, x) => n + Number(x.price), 0);
-  const dep = Math.min(Number(appt.deposit_amount ?? 0), total);
-  const [lines, setLines] = useState<{ method: string; amount: number }[]>(() => {
-    const l: { method: string; amount: number }[] = [];
+  const servicesTotal = appt.appointment_services.reduce((n, x) => n + Number(x.price), 0);
+  const dep = Math.min(Number(appt.deposit_amount ?? 0), servicesTotal);
+  const [items, setItems] = useState<SaleLine[]>([]);
+  const [showProducts, setShowProducts] = useState(false);
+  const [lines, setLines] = useState<PayLine[]>(() => {
+    const l: PayLine[] = [];
     if (dep > 0) l.push({ method: "przedplata", amount: dep });
-    if (total - dep > 0 || l.length === 0) l.push({ method: "gotowka", amount: total - dep });
+    if (servicesTotal - dep > 0 || l.length === 0) l.push({ method: "gotowka", amount: servicesTotal - dep });
     return l;
   });
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const paid = lines.reduce((n, l) => n + Number(l.amount || 0), 0);
+  const total = servicesTotal + linesTotal(items);
   const usable = methods.filter((m) => m.code !== "przedplata" || dep > 0);
+
+  function changeItems(next: SaleLine[]) {
+    setItems(next);
+    // dopłata za produkty trafia do ostatniej płatności (nie do przedpłaty)
+    const t = servicesTotal + linesTotal(next);
+    setLines((ls) =>
+      ls.length === 1 && ls[0].method === "przedplata" ? [...ls, { method: "gotowka", amount: Math.max(0, t - ls[0].amount) }] : rebalance(ls, t),
+    );
+  }
 
   async function save() {
     setBusy(true);
@@ -206,6 +221,7 @@ export function FinalizeDialog({
       p_id: appt.id,
       p_payments: lines,
       p_note: note || null,
+      p_products: items.filter((x) => x.qty > 0).map((x) => ({ product_id: x.product_id, qty: x.qty, price: x.price })),
     });
     setBusy(false);
     if (error) return setError(errText(error));
@@ -223,53 +239,29 @@ export function FinalizeDialog({
         </>
       }
     >
-      <p className="text-sm text-muted">Do zapłaty za usługi</p>
+      <p className="text-sm text-muted">Do zapłaty{items.length ? " (usługi + produkty)" : " za usługi"}</p>
       <p className="font-serif text-3xl">{money(total)}</p>
-
-      <span className="label mt-5">Płatność</span>
-      <ul className="space-y-2">
-        {lines.map((l, i) => (
-          <li key={i} className="flex items-center gap-2">
-            <select
-              className="input flex-1"
-              value={l.method}
-              onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, method: e.target.value } : x)))}
-              aria-label="Metoda płatności"
-            >
-              {usable.map((m) => (
-                <option key={m.code} value={m.code}>
-                  {m.name}
-                  {!m.counts_to_revenue ? " (poza utargiem)" : ""}
-                </option>
-              ))}
-            </select>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              className="input w-28"
-              value={l.amount}
-              onChange={(e) => setLines((ls) => ls.map((x, j) => (j === i ? { ...x, amount: +e.target.value } : x)))}
-              aria-label="Kwota"
-            />
-            <span className="text-sm text-muted">zł</span>
-            {lines.length > 1 && (
-              <button className="btn-ghost px-2" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} aria-label="Usuń">×</button>
-            )}
-          </li>
-        ))}
-      </ul>
-      <button
-        className="mt-2 text-sm text-accent hover:underline"
-        onClick={() => setLines((ls) => [...ls, { method: "karta", amount: Math.max(0, total - paid) }])}
-      >
-        + podziel płatność
-      </button>
-      {Math.abs(paid - total) > 0.009 && (
-        <p className="mt-3 text-sm text-muted">
-          Suma płatności: <strong>{money(paid)}</strong> ({paid < total ? `rabat ${money(total - paid)}` : `więcej o ${money(paid - total)}`}).
+      {items.length > 0 && (
+        <p className="text-xs text-muted">
+          usługi {money(servicesTotal)} · produkty {money(linesTotal(items))}
         </p>
       )}
+
+      <div className="mt-5">
+        {showProducts ? (
+          <>
+            <span className="label">Sprzedane produkty</span>
+            <ProductLines products={products} lines={items} onChange={changeItems} />
+          </>
+        ) : (
+          <button className="text-sm text-accent hover:underline" onClick={() => setShowProducts(true)}>
+            + dodaj sprzedane produkty
+          </button>
+        )}
+      </div>
+
+      <span className="label mt-5">Płatność</span>
+      <PaymentLines methods={usable} lines={lines} onChange={setLines} total={total} />
 
       <label className="label mt-5" htmlFor="fin-note">Notatka z zabiegu (opcjonalnie)</label>
       <textarea id="fin-note" rows={2} className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="np. użyte produkty, efekt, zalecenia" />

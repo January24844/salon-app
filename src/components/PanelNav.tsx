@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/panel/klientki", label: "Klientki" },
   { href: "/panel/pracownice", label: "Pracownice" },
   { href: "/panel/zabiegi", label: "Zabiegi" },
+  { href: "/panel/magazyn", label: "Magazyn" },
 ];
 
 export default function PanelNav({ isOwner, name }: { isOwner: boolean; name: string }) {
