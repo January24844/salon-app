@@ -5,30 +5,35 @@ import type { Product, SaleLine } from "@/lib/types";
 import { norm, qtyFmt } from "@/lib/types";
 import { money } from "@/lib/time";
 
-/** Wybór produktów do sprzedaży: wyszukiwarka + lista z ilością i ceną. */
+/**
+ * Wybór produktów: wyszukiwarka + lista z ilością i ceną.
+ * mode: "sale" – cena sprzedaży, "delivery" – cena zakupu, "usage" – sama ilość (także materiały).
+ */
 export default function ProductLines({
   products,
   lines,
   onChange,
+  mode = "sale",
 }: {
   products: Product[];
   lines: SaleLine[];
   onChange: (lines: SaleLine[]) => void;
+  mode?: "sale" | "delivery" | "usage";
 }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const list = useMemo(() => {
     const words = norm(q).split(/\s+/).filter(Boolean);
     return products
-      .filter((p) => p.active && p.kind !== "material")
+      .filter((p) => p.active && (mode !== "sale" || p.kind !== "material"))
       .filter((p) => words.every((w) => norm(p.name).includes(w)))
       .slice(0, 30);
-  }, [q, products]);
+  }, [q, products, mode]);
 
   function add(p: Product) {
     const existing = lines.findIndex((l) => l.product_id === p.id);
     if (existing >= 0) onChange(lines.map((l, i) => (i === existing ? { ...l, qty: l.qty + 1 } : l)));
-    else onChange([...lines, { product_id: p.id, name: p.name, qty: 1, price: Number(p.price), stock: Number(p.stock) }]);
+    else onChange([...lines, { product_id: p.id, name: p.name, qty: 1, price: mode === "sale" ? Number(p.price) : 0, stock: Number(p.stock) }]);
     setQ("");
     setOpen(false);
   }
@@ -75,7 +80,7 @@ export default function ProductLines({
             <li key={l.product_id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
               <span className="min-w-0 flex-1">
                 {l.name}
-                {l.qty > l.stock && (
+                {mode !== "delivery" && l.qty > l.stock && (
                   <span className="block text-xs text-amber-700 dark:text-amber-300">
                     Na stanie tylko {qtyFmt(l.stock)} – stan zejdzie poniżej zera.
                   </span>
@@ -84,8 +89,8 @@ export default function ProductLines({
               <label className="flex items-center gap-1 text-xs text-muted">
                 <input
                   type="number"
-                  min={1}
-                  step={1}
+                  min={0}
+                  step={mode === "usage" ? 0.5 : 1}
                   className="input w-16 px-2 py-1"
                   value={l.qty}
                   onChange={(e) => onChange(lines.map((x, j) => (j === i ? { ...x, qty: Math.max(0, +e.target.value) } : x)))}
@@ -93,18 +98,21 @@ export default function ProductLines({
                 />
                 szt.
               </label>
-              <label className="flex items-center gap-1 text-xs text-muted">
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  className="input w-20 px-2 py-1"
-                  value={l.price}
-                  onChange={(e) => onChange(lines.map((x, j) => (j === i ? { ...x, price: +e.target.value } : x)))}
-                  aria-label="Cena za sztukę"
-                />
-                zł
-              </label>
+              {mode !== "usage" && (
+                <label className="flex items-center gap-1 text-xs text-muted">
+                  {mode === "delivery" && "zakup"}
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    className="input w-20 px-2 py-1"
+                    value={l.price}
+                    onChange={(e) => onChange(lines.map((x, j) => (j === i ? { ...x, price: +e.target.value } : x)))}
+                    aria-label={mode === "delivery" ? "Cena zakupu za sztukę" : "Cena za sztukę"}
+                  />
+                  zł
+                </label>
+              )}
               <button className="btn-ghost px-2 py-1" onClick={() => onChange(lines.filter((_, j) => j !== i))} aria-label="Usuń produkt">
                 ×
               </button>

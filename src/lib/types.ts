@@ -146,12 +146,27 @@ export type StockMovement = {
   change: number;
   reason: StockReason;
   unit_price: number | null;
+  unit_cost?: number | null;
   note: string | null;
   created_at: string;
   appointment_id: string | null;
-  product: { name: string } | null;
+  product: { name: string; capacity_ml: number | null } | null;
   client: { first_name: string; last_name: string | null } | null;
   staff: { full_name: string } | null;
+};
+
+export type DeliveryDoc = "faktura" | "paragon" | "wz" | "inne";
+export const DOC_LABEL: Record<DeliveryDoc, string> = { faktura: "faktura", paragon: "paragon", wz: "WZ", inne: "inne" };
+
+export type Delivery = {
+  id: string;
+  document_type: DeliveryDoc;
+  document_number: string | null;
+  issued_on: string;
+  supplier: string | null;
+  note: string | null;
+  created_at: string;
+  stock_movements: { change: number; unit_cost: number | null; product: { name: string } | null }[];
 };
 
 /** Pozycja sprzedaży produktu (w sprzedaży i przy finalizacji wizyty). */
