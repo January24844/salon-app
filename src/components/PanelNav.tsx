@@ -8,6 +8,7 @@ const LINKS = [
   { href: "/panel", label: "Kalendarz" },
   { href: "/panel/klientki", label: "Klientki" },
   { href: "/panel/pracownice", label: "Pracownice" },
+  { href: "/panel/grafik", label: "Grafik" },
   { href: "/panel/zabiegi", label: "Zabiegi" },
   { href: "/panel/magazyn", label: "Magazyn" },
 ];

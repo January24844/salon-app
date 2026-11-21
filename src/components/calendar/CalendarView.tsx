@@ -32,9 +32,9 @@ import AppointmentForm, { type FormInit } from "./AppointmentForm";
 import {
   AppointmentDetails,
   DayNotesDialog,
-  DayScheduleDialog,
   FinalizeDialog,
 } from "./Dialogs";
+import DayDialog from "@/components/schedule/DayDialog";
 import MiniMonth from "./MiniMonth";
 import { workIntervals, type Interval } from "./schedule";
 import { errText } from "@/components/Modal";
@@ -103,6 +103,7 @@ export type CalendarData = {
   serviceRooms: { service_id: string; room_id: string }[];
   calendarStart: string;
   calendarEnd: string;
+  closedWeekdays: number[];
   isOwner: boolean;
 };
 
@@ -188,7 +189,7 @@ export default function CalendarView(props: CalendarData) {
   };
   const cols: Col[] = [
     ...visible.map((s) => {
-      const w = workIntervals(s.id, date, hours, schedule, fallback);
+      const w = workIntervals(s.id, date, hours, schedule, fallback, props.closedWeekdays);
       return {
         kind: "staff" as const,
         id: s.id,
@@ -721,6 +722,7 @@ export default function CalendarView(props: CalendarData) {
           labels={labels}
           methods={methods}
           hours={hours}
+          closedWeekdays={props.closedWeekdays}
           rooms={rooms}
           serviceRooms={props.serviceRooms}
           calendarRange={fallback}
@@ -767,16 +769,15 @@ export default function CalendarView(props: CalendarData) {
       {dialog?.kind === "schedule" &&
         (() => {
           const s = staff.find((x) => x.id === dialog.staffId)!;
-          const w = workIntervals(s.id, date, hours, schedule, fallback);
-          const weekly = workIntervals(s.id, date, hours, [], fallback);
+          const w = workIntervals(s.id, date, hours, schedule, fallback, props.closedWeekdays);
+          const weekly = workIntervals(s.id, date, hours, [], fallback, props.closedWeekdays);
           return (
-            <DayScheduleDialog
-              staff={s}
+            <DayDialog
+              staffId={s.id}
+              staffName={s.full_name}
               date={date}
               current={w.override}
-              weeklyLabel={
-                hours.some((h) => h.staff_id === s.id) ? weekly.label : ""
-              }
+              defaultLabel={hours.some((h) => h.staff_id === s.id) ? `stały grafik: ${weekly.label}` : "brak grafiku"}
               onClose={() => setDialog(null)}
               onSaved={refresh}
             />

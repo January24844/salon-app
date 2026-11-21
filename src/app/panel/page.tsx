@@ -44,7 +44,7 @@ export default async function CalendarPage({ searchParams }: PageProps<"/panel">
     supabase.from("labels").select("*").order("name"),
     supabase.from("payment_methods").select("*").eq("active", true).order("sort_order"),
     supabase.from("calendar_day_notes").select("*").eq("day", date).order("created_at"),
-    supabase.from("salon_settings").select("calendar_start, calendar_end").maybeSingle(),
+    supabase.from("salon_settings").select("*").maybeSingle(),
     supabase.from("rooms").select("*").eq("active", true).order("sort_order").order("name"),
     supabase.from("service_rooms").select("service_id, room_id"),
     supabase.from("products").select("*").eq("active", true).neq("kind", "material").order("name"),
@@ -76,6 +76,7 @@ export default async function CalendarPage({ searchParams }: PageProps<"/panel">
       rooms={(rooms.data ?? []) as Room[]}
       products={(products.data ?? []) as Product[]}
       serviceRooms={serviceRooms.data ?? []}
+      closedWeekdays={(settings.data?.closed_weekdays as number[] | undefined) ?? [7]}
       calendarStart={settings.data?.calendar_start ?? "08:00"}
       calendarEnd={settings.data?.calendar_end ?? "21:00"}
       isOwner={role === "owner"}

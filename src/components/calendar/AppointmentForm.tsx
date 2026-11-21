@@ -31,6 +31,7 @@ export default function AppointmentForm({
   labels,
   methods,
   hours,
+  closedWeekdays = [],
   rooms,
   serviceRooms,
   calendarRange,
@@ -44,6 +45,7 @@ export default function AppointmentForm({
   labels: Label[];
   methods: PaymentMethod[];
   hours: WorkingHours[];
+  closedWeekdays?: number[];
   rooms: Room[];
   serviceRooms: { service_id: string; room_id: string }[];
   calendarRange: Interval;
@@ -275,6 +277,7 @@ export default function AppointmentForm({
             room={rooms.find((r) => r.id === roomId) ?? null}
             duration={duration}
             hours={hours}
+            closedWeekdays={closedWeekdays}
             fallback={calendarRange}
             excludeId={a?.id}
             selected={time}
@@ -588,6 +591,7 @@ function FreeTimes({
   room,
   duration,
   hours,
+  closedWeekdays,
   fallback,
   excludeId,
   selected,
@@ -598,6 +602,7 @@ function FreeTimes({
   room: Room | null;
   duration: number;
   hours: WorkingHours[];
+  closedWeekdays: number[];
   fallback: Interval;
   excludeId?: string;
   selected: string;
@@ -636,7 +641,7 @@ function FreeTimes({
   }, [key, date, staffId, room, excludeId]);
 
   if (!data || data.key !== key) return <p className="text-xs text-muted">Sprawdzam wolne godziny…</p>;
-  const work = workIntervals(staffId, date, hours, data.schedule, fallback);
+  const work = workIntervals(staffId, date, hours, data.schedule, fallback, closedWeekdays);
   // gdy wybrany gabinet – tylko godziny, w których jest też otwarty
   const roomOpen: Interval | null = room ? [timeToMin(room.open_time), timeToMin(room.close_time)] : null;
   const intervals = roomOpen

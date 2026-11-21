@@ -14,10 +14,20 @@ export type Staff = {
 
 export type WorkingHours = { staff_id: string; weekday: number; start_time: string; end_time: string };
 
+export type DayKind = "work" | "off" | "vacation" | "sick" | "holiday";
+export const DAY_KIND_LABEL: Record<DayKind, string> = {
+  work: "praca",
+  off: "dzień wolny",
+  vacation: "urlop",
+  sick: "L4",
+  holiday: "święto",
+};
+
 export type ScheduleDay = {
   id: string;
   staff_id: string;
   day: string;
+  kind?: DayKind;
   is_day_off: boolean;
   start_time: string | null;
   end_time: string | null;
@@ -175,3 +185,11 @@ export type SaleLine = { product_id: string; name: string; qty: number; price: n
 /** Ilość bez zbędnych zer: 1, 2,5 */
 export const qtyFmt = (n: number | string) =>
   new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 2 }).format(Number(n));
+
+export type ScheduleTemplate = {
+  id: string;
+  staff_id: string;
+  name: string;
+  weeks: number;
+  schedule_template_days: { week_no: number; weekday: number; start_time: string; end_time: string }[];
+};
