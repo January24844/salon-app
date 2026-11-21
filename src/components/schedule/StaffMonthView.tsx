@@ -145,8 +145,7 @@ export default function StaffMonthView({
           </div>
           {templates.length === 0 ? (
             <p className="text-sm text-muted">
-              Zapisz stały układ pracy (np. pon i czw 17–21, co drugi tydzień pt zamiast czw), a potem jednym kliknięciem wstaw go
-              na kolejne tygodnie lub miesiące.
+              Zapisz stały układ pracy
             </p>
           ) : (
             <ul className="space-y-3">
